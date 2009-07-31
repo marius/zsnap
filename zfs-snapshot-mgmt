@@ -1,0 +1,222 @@
+#!/usr/local/bin/ruby
+# Copyright (c) 2008, Marcin Simonides
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+# INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+# FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR
+# BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+require 'yaml'
+require 'time'
+
+CONFIG_FILE_NAME = '/usr/local/etc/zfs-snapshot-mgmt.conf'
+CONFIG_SIZE_MAX = 64 * 1024     # just a safety limit
+
+class ConfigError < Exception
+end
+
+def encode_time(time)
+  time.strftime('%Y-%m-%d_%H.%M')
+end
+
+def decode_time(time_string)
+  date, time = time_string.split('_')
+  year, month, day = date.split('-')
+  hour, minute = time.split('.')
+  Time.mktime(year, month, day, hour, minute)
+end
+
+class Rule
+  attr_reader :at_multiple, :offset
+
+  def initialize(args = {})
+    args = { 'offset' => 0 }.merge(args)
+    @at_multiple = args['at_multiple'].to_i
+    @offset = args['offset'].to_i
+  end
+
+  def condition_met?(time_minutes)
+    divisor = @at_multiple
+    (divisor == 0) or ((time_minutes - @offset) % divisor) == 0
+  end
+end
+
+class PreservationRule < Rule
+  attr_reader :for_minutes
+
+  def initialize(args)
+    super(args)
+    @for_minutes = args['for_minutes'].to_i
+  end
+
+  def applies?(now_minutes, creation_time_minutes)
+    (now_minutes - creation_time_minutes) < @for_minutes 
+  end
+
+  def condition_met_for_snapshot?(now_minutes, snapshot)
+    creation_time_minutes = snapshot.creation_time_minutes
+    applies?(now_minutes, creation_time_minutes) and
+      condition_met?(creation_time_minutes)
+  end
+
+end
+
+class SnapshotInfo
+  attr_reader :fs_name, :name, :creation_date
+
+  def initialize(name, fs_name, snapshot_prefix)
+    @name = name
+    @fs_name = fs_name
+    @creation_date = parse_date(name[snapshot_prefix.length .. -1])
+  end
+
+  def self.new_snapshot(fs_name, snapshot_prefix)
+    name = snapshot_prefix + encode_time(Time.now)
+    SnapshotInfo.new(name, fs_name, snapshot_prefix)
+  end
+
+
+  def creation_time_minutes
+    @creation_date.to_i / 60
+  end
+
+  # Returns canonical name of the snapshot and FS (as accepted by zfs command)
+  # e.g.: /tank/usr@snapshot
+  def canonical_name
+    if (@fs_name and @name)
+      @fs_name + '@' + @name
+    else
+      raise "SnapshotInfo doesn't contain name and/or fs_name"
+    end
+  end
+
+private
+  def parse_date(date_string)
+    decode_time(date_string)
+  end
+
+end
+
+class FSInfo
+  attr_reader :name, :creation_rule, :mount_point, :preservation_rules, :recursive
+
+  def initialize(fs_name, values = {})
+    @name = fs_name
+    @mount_point = get_mount_point(fs_name)
+    if (values['creation_rule'].nil?)
+      raise ConfigError.new("Filesystem #{fs_name} has no creation rule")
+    end
+    if (values['preservation_rules'].nil?)
+      raise ConfigError.new("Filesystem #{fs_name} has no preservation rules")
+    end
+    
+    @creation_rule = Rule.new(values['creation_rule'])
+    @preservation_rules = values['preservation_rules'].map do |value|
+      PreservationRule.new(value)
+    end
+    @is_recursive = values['recursive'].nil? ? false : values['recursive']
+  end
+
+  def create?(now_minutes)
+    @creation_rule.condition_met?(now_minutes)
+  end
+
+  def snapshots(prefix)
+    path = File.join(@mount_point, '.zfs', 'snapshot')
+    Dir.open(path).select do |name|
+      name[0, prefix.length] == prefix
+    end.map { |name| SnapshotInfo.new(name, @name, prefix) }
+  end
+
+  def snapshots_to_remove(now_minutes, prefix)
+    snapshots(prefix).reject do |snapshot|
+      @preservation_rules.any? do |rule|
+        rule.condition_met_for_snapshot?(now_minutes, snapshot)
+      end
+    end
+  end
+
+  def remove_snapshots(now_minutes, prefix)
+    snapshots_to_remove(now_minutes, prefix).each do |s|
+      remove_snapshot(s)
+    end
+  end
+
+  def create_snapshot(now_minutes, prefix)
+    if create?(now_minutes)
+      create_snapshot_from_info(SnapshotInfo.new_snapshot(name, prefix))
+    end
+  end
+
+  def pool
+    # More or less according to ZFS Component Naming Requirements (http://docs.sun.com/app/docs/doc/819-5461/gbcpt)
+    name[/\A[a-zA-Z_:.-]+/]
+  end
+
+private
+
+  def remove_snapshot(snapshot_info)
+    arguments = @is_recursive ? '-r ' : ' '
+    system('zfs destroy ' + arguments + snapshot_info.canonical_name)
+  end
+
+  def create_snapshot_from_info(snapshot_info)
+    arguments = @is_recursive ? '-r ' : ' '
+    system('zfs snapshot ' + arguments + snapshot_info.canonical_name)
+  end
+
+  def get_mount_point(fs_name)
+    IO.popen('zfs mount').readlines.collect { |line| line.split(' ') }.select { |item| item.first == fs_name }.collect { |item| item.last }.first
+  end
+
+end
+
+class Config
+  attr_reader :snapshot_prefix, :filesystems, :pools
+
+  def initialize(value)
+    @snapshot_prefix = value['snapshot_prefix']
+    @filesystems = value['filesystems'].map do |key, val|
+      FSInfo.new(key, val)
+    end
+    @pools = filesystems.map { |fs| fs.pool }.uniq
+  end
+
+  def busy_pools
+    @pools.select do |p|
+      IO.popen('zpool status ' + p).any? { |l| l['scrub in progress'] }
+    end
+  end
+
+end
+
+config_yaml = File.open(CONFIG_FILE_NAME).read(CONFIG_SIZE_MAX)
+die "Config file too long" if config_yaml.nil?
+config = Config.new(YAML::load(config_yaml))
+
+now_minutes = Time.now.to_i / 60
+
+# A simple way of avoiding interaction with zpool scrubbing
+busy_pools = config.busy_pools
+
+config.filesystems.each do |f|
+  if (false == busy_pools.include?(f.pool))
+    f.create_snapshot(now_minutes, config.snapshot_prefix)
+    f.remove_snapshots(now_minutes, config.snapshot_prefix)
+  end
+end
