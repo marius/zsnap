@@ -1,0 +1,32 @@
+# Automatic ZFS snapshot management configuration file
+#
+# This is a YAML file (see http://www.yaml.org)
+# Use exactly 2 spaces for each indentation level
+#
+snapshot_prefix: auto-
+filesystems:
+  tank/usr/home:
+    # Create snapshots recursively for all filesystems mounted under this one
+    recursive: true
+    # Create snapshots every 10 minutes, starting at midnight
+    creation_rule:
+      at_multiple: 10
+      offset: 0
+    # Keep all snapshots for the first 90 minutes,
+    # then only those that were created at 30 minute intervals for 12 hours
+    # (after snapshot creation),
+    # then only those that were created at 3 hour intervals, counting at 2:00
+    # (i.e. 2:00, 5:00, 8:00, 11:00, 14:00, 17:00, 20:00, 23:00)
+    # for 7 days
+    preservation_rules:
+      - { for_minutes:    90, at_multiple:    0, offset:    0 }
+      - { for_minutes:   720, at_multiple:   30, offset:    0 }
+      - { for_minutes: 10080, at_multiple:  180, offset:  120 }
+  tank/usr:
+    # Create snapshots every 24 hours, starting at 20:00.
+    creation_rule:
+      at_multiple: 1440
+      offset: 1200
+    # Keep daily snapshots created at 20:00 (in this case all).
+    preservation_rules:
+      - { for_minutes: 5760, at_multiple: 1440, offset: 1200 }

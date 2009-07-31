@@ -1,0 +1,164 @@
+.Dd June 6, 2008
+.Dt ZFS-SNAPSHOT-MGMT 8
+.Os
+.Sh NAME
+.Nm zfs-snapshot-mgmt
+.Nd automate creation of new and removal of stale ZFS snapshots
+.Sh SYNOPSIS
+.Nm
+.Sh DESCRIPTION
+The utility creates ZFS snapshots and removes snapshots it has created that
+are stale.
+Rules for creating and removing are defined in the configuration file.
+.Pp
+.Nm
+is designed to be run by the
+.Xr cron 8
+utility.
+.Sh CONFIGURATION
+.Nm
+reads settings from the 
+.Pa /usr/local/etc/zfs-snapshot-mgmt.conf
+file.
+.Ss General Structure
+The file is in the YAML format: it contains keys and values separated by
+a colon (:). Each value may span multiple lines and be a list or a map with
+key-value pairs. The indentation is always a multiple of two spaces.
+.Pp
+There are two top-level options:
+.Bl -tag -width "1234"
+.It snapshot_prefix
+prefix for snapshots created and recognised by this tool.
+All created snapshots
+will have names consisting of this prefix and current date and time.
+Only snapshots beginning with this prefix will be considered for removal.
+.It filesystems
+the main part of configuration - specifies rules for creating and removing
+snapshots at each filesystem.
+The value for this key contains keys for each filesystem
+(as seen by ZFS, e.g. tank/home)
+with snapshot creation and preservation settings.
+.El
+.Pp
+There is an example configuration in the
+.Sx EXAMPLES
+section.
+.Ss Creation Rules
+For each filesystem there is one snapshot
+.Li creation_rule
+defined.
+It specifies when snapshots for the particular filesystem should be created.
+It has two parameters.
+All values are specified in minutes.
+.Bl -tag -width "1234"
+.It at_multiple
+defines how often should a snapshot be created.
+E.g. a value of 60 means that a snapshot is to be created every hour.  
+.It offset
+defines an offset from midnight that is to be applied to the
+.Ix at_multiple
+parameter.
+E.g. specifying a value of 30 means that the first snapshot will be taken 30
+minutes after midnight.
+.El
+.Ss Preservation Rules
+These rules specify which of the created snapshots should be preserved.
+All that do not match the any of the rules and whose names begin with
+.Li snapshot_prefix
+are destroyed.
+.Pp
+Each of the rules has three parameters:
+.Bl -tag -width "1234"
+.It for_minutes
+specifies how long after snapshot creation is the rule applicable.
+.It at_multiple
+analogous to the same parameter for
+.Li creation_rule
+- snapshots whose creation time 
+(in minutes since midnight)
+is a multiple of this value are retained.
+.It offset
+analogous to the same parameter for
+.Li creation_rule
+- applies to
+.Li at_multiple .
+.El
+.Sh EXAMPLES
+.Ss Crontab Configuration
+To invoke the program every five minutes you may add the following line to
+the
+.Pa /etc/crontab
+configuration file:
+.Pp
+.D1 */5 * * * *         root    /usr/local/bin/zfs-snapshot-mgmt
+.Pp
+Bear in mind that this effectively limits the resolution to 5 minutes.
+.Ss zfs-snapshot-mgmt.conf
+Here is an example configuration.
+.Bd -literal -offset indent
+snapshot_prefix: auto-
+filesystems:
+  tank/usr/home:
+    creation_rule:
+      at_multiple: 5
+      offset: 0
+    preservation_rules:
+      - { for_minutes:    90, at_multiple:    0, offset:    0 }
+      - { for_minutes:   720, at_multiple:   30, offset:    0 }
+      - { for_minutes: 10080, at_multiple:  180, offset:  120 }
+  tank/usr:
+    recursive: true
+    creation_rule:
+      at_multiple: 1440
+      offset: 1200
+    preservation_rules:
+      - { for_minutes: 5760, at_multiple: 1440, offset: 1200 }
+.Ed
+.Pp
+which specifies the following settings:
+.Bl -bullet
+.It
+names of created snapshots start with
+.Li auto-
+and only such snapshots are considered for removal.
+.It
+there are two filesystems:
+.Li tank/usr/home
+and
+.Li tank/usr .
+.It
+snapshots for
+.Li tank/usr/home
+are created every five minutes, starting at midnight.
+.It
+all snapshots for
+.Li tank/usr/home
+are kept for 90 minutes after creation.
+.It 
+only snapshots created af full and half hour are retained for 12 hours
+(720 minutes) after creation for
+.Li tank/usr/home .
+.It
+snapshots created at multiple of three hours starting with 2 a.m. are retained
+for a week (10080 minutes) after creation for
+.Li tank/usr/home .
+This means: 2 a.m., 5 a.m., 8 a.m. and so on.
+.It
+snapshots on
+.Li tank/usr
+are created once a day at 20 p.m. and retained for 4 days.
+.It
+snapshots are taken recursively on
+.Li tank/usr
+filesystem and all filesystems mounted under it.
+.El
+.Sh FILES
+.Pa /usr/local/etc/zfs-snapshot-mgmt.conf
+The configuration file
+.Sh SEE ALSO
+.Xr cron 8 ,
+.Xr zfs 1M
+.Sh AUTHORS
+.An Marcin Simonides Aq marcin@studio4plus.com
+.Sh BUGS
+There is no way to use alternative path for the configuration file.

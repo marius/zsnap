@@ -1,0 +1,39 @@
+FreeBSD Installation
+--------------------
+
+FreeBSD users please use the sysutils/zfs-snapshot-mgmt port:
+
+  cd /usr/ports/sysutils/zfs-snapshot-mgmt
+  make install clean
+
+and follow the instructions printed after installation.
+
+See the manpage for details:
+
+  man zfs-snapshot-mgmt
+
+
+
+Manual Installation
+-------------------
+
+Requirements:
+  Ruby
+  (/usr/local/bin/ruby, edit the first line of script for a different path)
+
+Copy the zfs-snapshot-mgmt script to /usr/local/bin.
+Copy the zfs-snapshot-mgmt.conf.sample file to
+/usr/local/etc/zfs-snapshot-mgmt.conf (this path is hardcoded in the script,
+sorry. You may change it manually (grep for CONFIG_FILE)).
+Copy the zfs-snapshot-mgmt.8 file to man8 directory on your system (usually
+/usr/local/share/man/man8/ or just /usr/share/man/man8/).
+
+Read the manual page (man zfs-snapshot-mgmt).
+
+Edit the zfs-snapshot-mgmt.conf file.
+Add the script to crontab (usually /etc/crontab but may differ on your system),
+append a line like this:
+
+*/5  *  *  *  *         root            /usr/local/bin/zfs-snapshot-mgmt
+
+From now on the snapshots will be automatically created.
