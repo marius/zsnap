@@ -1,4 +1,4 @@
-#!/usr/local/bin/ruby
+#!/usr/local/bin/ruby -w
 # Copyright (c) 2008, Marcin Simonides
 # All rights reserved.
 #
@@ -28,8 +28,6 @@ CONFIG_FILE_NAME = '/usr/local/etc/zfs-snapshot-mgmt.conf'
 CONFIG_SIZE_MAX = 64 * 1024     # just a safety limit
 
 class Rule
-  attr_reader :at_multiple, :offset
-
   def initialize(args = {})
     args = { 'offset' => 0 }.merge(args)
     @at_multiple = args['at_multiple'].to_i
@@ -43,8 +41,6 @@ class Rule
 end
 
 class PreservationRule < Rule
-  attr_reader :for_minutes
-
   def initialize(args)
     super(args)
     @for_minutes = args['for_minutes'].to_i
@@ -62,8 +58,6 @@ class PreservationRule < Rule
 end
 
 class SnapshotInfo
-  attr_reader :fs_name, :name
-
   def initialize(name, fs_name, snapshot_prefix)
     @name = name
     @fs_name = fs_name
@@ -100,8 +94,6 @@ class SnapshotInfo
 end
 
 class FSInfo
-  attr_reader :name, :creation_rule, :mount_point, :preservation_rules
-
   def initialize(fs_name, values = {})
     @name = fs_name
     @mount_point = get_mount_point(fs_name)
@@ -147,37 +139,36 @@ class FSInfo
   end
 
   def pool
-    # More or less according to ZFS Component Naming Requirements (http://docs.sun.com/app/docs/doc/819-5461/gbcpt)
-    name[/\A[a-zA-Z_:.-]+/]
+    # More or less according to ZFS Component Naming Requirements
+    # http://docs.sun.com/app/docs/doc/819-5461/gbcpt
+    @name[/\A[a-zA-Z_:.-]+/]
   end
 
   private
 
   def remove_snapshot(snapshot_info)
     arguments = @is_recursive ? '-r ' : ''
-    system('zfs destroy ' + arguments + snapshot_info.canonical_name)
+    system 'zfs destroy ' + arguments + snapshot_info.canonical_name
   end
 
   def create_snapshot_from_info(snapshot_info)
     arguments = @is_recursive ? '-r ' : ''
-    system('zfs snapshot ' + arguments + snapshot_info.canonical_name)
+    system 'zfs snapshot ' + arguments + snapshot_info.canonical_name
   end
 
   def get_mount_point(fs_name)
-    `zfs mount`.collect { |line| line.split(' ') }
-      .select { |item| item.first == fs_name }.collect { |item| item.last }.first
+    `zfs mount`.collect { |line| line.split(' ') }.
+      select { |item| item.first == fs_name }.collect { |item| item.last }.first
   end
 end
 
 class Config
-  attr_reader :snapshot_prefix, :filesystems, :pools
+  attr_reader :snapshot_prefix, :filesystems
 
   def initialize(value)
     @snapshot_prefix = value['snapshot_prefix']
-    @filesystems = value['filesystems'].map do |key, val|
-      FSInfo.new(key, val)
-    end
-    @pools = filesystems.map { |fs| fs.pool }.uniq
+    @filesystems = value['filesystems'].map { |key, val| FSInfo.new(key, val) }
+    @pools = @filesystems.map { |fs| fs.pool }.uniq
   end
 
   def busy_pools
@@ -185,7 +176,6 @@ class Config
       `zpool status #{pool}`.any? { |line| line.include? 'scrub in progress' }
     end
   end
-
 end
 
 
