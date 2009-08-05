@@ -181,7 +181,7 @@ end
 
 if __FILE__ == $0
   config_yaml = File.open(CONFIG_FILE_NAME).read(CONFIG_SIZE_MAX)
-  die "Config file too long" unless config_yaml
+  die "reading config file" unless config_yaml
   config = Config.new(YAML::load(config_yaml))
 
   now_minutes = Time.now.to_i / 60
