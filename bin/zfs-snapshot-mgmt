@@ -24,17 +24,12 @@
 
 require 'zsnap'
 
-config_yaml = File.open(Zsnap::CONFIG_FILE_NAME).read(Zsnap::CONFIG_SIZE_MAX)
-die "reading config file" unless config_yaml
-config = Zsnap::Config.new(YAML::load(config_yaml))
+config = Zsnap::Config.new(YAML::load(File.open(Zsnap::CONFIG_FILE_NAME).read))
 
 now_minutes = Time.now.to_i / 60
 
-# A simple way of avoiding interaction with zpool scrubbing
-busy_pools = config.busy_pools
-
 config.filesystems.each do |fs|
-  unless busy_pools.include? fs.pool
+  unless config.busy_pools.include? fs.pool
     fs.create_snapshot(now_minutes, config.snapshot_prefix)
     fs.remove_snapshots(now_minutes, config.snapshot_prefix)
   end
