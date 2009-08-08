@@ -28,7 +28,6 @@ require 'time'
 module Zsnap
 
 CONFIG_FILE_NAME = '/usr/local/etc/zfs-snapshot-mgmt.conf'
-CONFIG_SIZE_MAX = 64 * 1024     # just a safety limit
 
 class Rule
   def initialize(args = {})
