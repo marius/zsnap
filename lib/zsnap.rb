@@ -67,11 +67,6 @@ class SnapshotInfo
     @creation_time = parse_timestamp(name[snapshot_prefix.length .. -1])
   end
 
-  def self.new_snapshot(fs_name, snapshot_prefix)
-    name = snapshot_prefix + Time.now.strftime('%Y-%m-%d_%H.%M')
-    new(name, fs_name, snapshot_prefix)
-  end
-
   def creation_time_minutes
     @creation_time.to_i / 60
   end
@@ -97,9 +92,8 @@ class SnapshotInfo
 end
 
 class FSInfo
-  def initialize(fs_name, values = {})
+  def initialize(fs_name, values)
     @name = fs_name
-    @mount_point = get_mount_point(fs_name)
     raise "Filesystem #{fs_name} has no creation rule" unless values['creation_rule']
     raise "Filesystem #{fs_name} has no preservation rules" unless values['preservation_rules']
 
@@ -115,7 +109,7 @@ class FSInfo
   end
 
   def snapshots(prefix)
-    path = File.join(@mount_point, '.zfs', 'snapshot')
+    path = File.join(mount_point, '.zfs', 'snapshot')
     Dir.open(path).select do |name|
       name[0, prefix.length] == prefix
     end.map { |name| SnapshotInfo.new(name, @name, prefix) }
@@ -130,14 +124,14 @@ class FSInfo
   end
 
   def remove_snapshots(now_minutes, prefix)
-    snapshots_to_remove(now_minutes, prefix).each do |s|
-      remove_snapshot(s)
+    snapshots_to_remove(now_minutes, prefix).each do |snapshot|
+      remove_snapshot(snapshot)
     end
   end
 
   def create_snapshot(now_minutes, prefix)
     if create?(now_minutes)
-      create_snapshot_from_info(SnapshotInfo.new_snapshot(name, prefix))
+      create_snapshot_from_info(SnapshotInfo.new(prefix + Time.now.strftime('%Y-%m-%d_%H.%M'), @name, prefix))
     end
   end
 
@@ -159,9 +153,9 @@ class FSInfo
     system 'zfs snapshot ' + arguments + snapshot_info.canonical_name
   end
 
-  def get_mount_point(fs_name)
+  def mount_point
     `zfs mount`.collect { |line| line.split(' ') }.
-      select { |item| item.first == fs_name }.collect { |item| item.last }.first
+      select { |item| item.first == @name }.collect { |item| item.last }.first
   end
 end
 
