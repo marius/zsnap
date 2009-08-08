@@ -1,5 +1,5 @@
 require 'test/unit'
-require 'zsnap'
+require 'lib/zsnap'
 
 include Zsnap
 
